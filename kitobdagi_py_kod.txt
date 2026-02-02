@@ -1,0 +1,141 @@
+import numpy as np
+
+# ======================
+# Parameters
+# ======================
+nx, ny = 50, 50
+Lx, Ly = 1.0, 1.0
+rho = 1.0
+nu = 0.1
+dt = 0.001
+nsteps = 100
+nit = 100
+
+u_top = 1.0
+u_bot = 0.0
+v_left = 0.0
+v_right = 0.0
+
+# ======================
+# Grid
+# ======================
+imin, jmin = 1, 1
+imax, jmax = imin + nx - 1, jmin + ny - 1
+
+dx = Lx / nx
+dy = Ly / ny
+dxi, dyi = 1.0/dx, 1.0/dy
+
+# ======================
+# Fields (staggered grid)
+# ======================
+u  = np.zeros((imax+2, jmax+3))
+v  = np.zeros((imax+3, jmax+2))
+us = np.zeros_like(u)
+vs = np.zeros_like(v)
+
+p   = np.zeros((imax+3, jmax+3))
+rhs = np.zeros((imax+1, jmax+1))
+
+# ======================
+# Time loop
+# ======================
+for step in range(nsteps):
+
+    # ----------------------
+    # Predictor: u*
+    # ----------------------
+    for j in range(jmin, jmax+1):
+        for i in range(imin+1, imax+1):
+
+            v_here = 0.25 * (
+                v[i-1,j] + v[i-1,j+1] +
+                v[i,  j] + v[i,  j+1]
+            )
+
+            us[i,j] = u[i,j] + dt * (
+                nu * (
+                    (u[i-1,j] - 2*u[i,j] + u[i+1,j]) * dxi**2 +
+                    (u[i,j-1] - 2*u[i,j] + u[i,j+1]) * dyi**2
+                )
+                - u[i,j] * (u[i+1,j] - u[i-1,j]) * 0.5 * dxi
+                - v_here * (u[i,j+1] - u[i,j-1]) * 0.5 * dyi
+            )
+
+    # ----------------------
+    # Predictor: v*
+    # ----------------------
+    for j in range(jmin+1, jmax+1):
+        for i in range(imin, imax+1):
+
+            u_here = 0.25 * (
+                u[i,  j-1] + u[i,  j] +
+                u[i+1,j-1] + u[i+1,j]
+            )
+
+            vs[i,j] = v[i,j] + dt * (
+                nu * (
+                    (v[i-1,j] - 2*v[i,j] + v[i+1,j]) * dxi**2 +
+                    (v[i,j-1] - 2*v[i,j] + v[i,j+1]) * dyi**2
+                )
+                - u_here * (v[i+1,j] - v[i-1,j]) * 0.5 * dxi
+                - v[i,j] * (v[i,j+1] - v[i,j-1]) * 0.5 * dyi
+            )
+
+    # ----------------------
+    # BC on predicted velocities (IMPORTANT)
+    # ----------------------
+    us[:, jmin-1] = 2*u_bot - us[:, jmin]
+    us[:, jmax+1] = 2*u_top - us[:, jmax]
+
+    vs[imin-1, :] = 2*v_left - vs[imin, :]
+    vs[imax+1, :] = 2*v_right - vs[imax, :]
+
+    # No-slip side walls
+    us[imin, :] = 0.0
+    us[imax+1, :] = 0.0
+    vs[:, jmin] = 0.0
+    vs[:, jmax+1] = 0.0
+
+    # ----------------------
+    # RHS for Poisson
+    # ----------------------
+    for j in range(jmin, jmax+1):
+        for i in range(imin, imax+1):
+            rhs[i,j] = rho/dt * (
+                (us[i+1,j] - us[i,j]) * dxi +
+                (vs[i,j+1] - vs[i,j]) * dyi
+            )
+
+    # ----------------------
+    # Pressure Poisson solver
+    # ----------------------
+    for it in range(nit):
+        for j in range(jmin, jmax+1):
+            for i in range(imin, imax+1):
+                p[i,j] = (
+                    (p[i+1,j] + p[i-1,j]) * dxi**2 +
+                    (p[i,j+1] + p[i,j-1]) * dyi**2 -
+                    rhs[i,j]
+                ) / (2*(dxi**2 + dyi**2))
+
+        # Neumann BC
+        p[imin-1, jmin:jmax+1] = p[imin, jmin:jmax+1]
+        p[imax+1, jmin:jmax+1] = p[imax, jmin:jmax+1]
+        p[imin:imax+1, jmin-1] = p[imin:imax+1, jmin]
+        p[imin:imax+1, jmax+1] = p[imin:imax+1, jmax]
+
+        p[imin, jmin] = 0.0   # pressure reference
+
+    # ----------------------
+    # Corrector
+    # ----------------------
+    for j in range(jmin, jmax+1):
+        for i in range(imin+1, imax+1):
+            u[i,j] = us[i,j] - dt/rho * (p[i,j] - p[i-1,j]) * dxi
+
+    for j in range(jmin+1, jmax+1):
+        for i in range(imin, imax+1):
+            v[i,j] = vs[i,j] - dt/rho * (p[i,j] - p[i,j-1]) * dyi
+
+print("? Simulation finished successfully")
